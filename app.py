@@ -1,6 +1,11 @@
 import logging
-from flask import Flask, request, jsonify, redirect
+import time
+import jwt
+import datetime
+from flask import Flask, request, jsonify, redirect, render_template
 from flask_cors import CORS
+
+from mock_data import FUSION_AUTH_DATA, LINKED_IN_DATA
 
 """
 app.py
@@ -20,48 +25,45 @@ logger = logging.getLogger()
 app = Flask(__name__)
 CORS(app)
 
-# Mock Data - USE THIS PARAMETERS IN THE FRONTEND AND BACKEND ACCORDINGLY
-
-LINKED_IN_DATA = {
-    'client_id': 'linkedin-client-id',
-    'client_secret': 'linkedin-secret',
-    'response_type': 'code',
-    'auth_code': 'mock_auth_code_for_linked_in',
-    'grant_type': 'authorization_code'
-}
-
-FUSION_AUTH_DATA = {
-    'client_id': 'fusionauth-client-id',
-    'client_secret': 'fusionauth-secret',
-    'response_type': 'code',
-    'tenant_id': 'f82aa83e-a48c-4621-ab4c-ea2a1b7a5195',
-    'auth_code': 'mock_auth_code_for_fusion_auth',
-    'grant_type': 'authorization_code'
-}
-
-@app.route('/linkedin/authorization')
+@app.route('/linkedin/authorization', methods=['GET', 'POST'])
 def li_authorization():
     """
     The endpoint matches the naming of the real LinkedIn API
     """
-    logger.info("Authorization: %s", request.args.to_dict())
-    response_type = request.args.get('response_type')
-    client_id = request.args.get('client_id')
-    redirect_uri = request.args.get('redirect_uri')
-    state = request.args.get('state')
-    scope = request.args.get('scope')
+
+    if request.method == 'GET':
+        args = request.args.to_dict()
+    else:
+        args = request.form.to_dict()
+    logger.info("Authorization: %s", args)
+
+    response_type = args.get('response_type')
+    client_id = args.get('client_id')
+    redirect_uri = args.get('redirect_uri')
+    state = args.get('state')
+    scope = args.get('scope')
 
     if redirect_uri is None or redirect_uri == '':
         return "No redirect URI passed in request", 400
 
     result_url = redirect_uri
+    result_url += f"?state={state}"
+
+    if request.method == 'POST':
+        approved = args.get('approve')
+        if approved == "yes":
+            result_url += f"&code={LINKED_IN_DATA['auth_code']}"
+        else:
+            result_url += f"&error=user_cancelled_authorize&error_description=User%20said%20NO"
+
+        return redirect(result_url)
+    
     if client_id == LINKED_IN_DATA['client_id'] \
         and response_type == LINKED_IN_DATA['response_type']:
-        # Simulate user authorization by redirecting with an auth code
-        result_url += f"?code={LINKED_IN_DATA['auth_code']}"
-    else:
-        result_url += f"?error=user_cancelled_authorize&error_description=invalid%20request%20params"
+        return render_template("authorize.html", client_id=client_id, service_name="LinkedIn", service_path="/linkedin/authorization")
     
+    result_url += f"&error=user_cancelled_authorize&error_description=invalid%20request%20params"
+
     if state is not None and state != '':
         result_url += f"&state={state}"
     return redirect(result_url)
@@ -73,6 +75,7 @@ def fa_authorize():
     The endpoint matches the naming of the real FusionAuth AIP
     """
     logger.info("Authorization: %s", request.args.to_dict())
+    time.sleep(3)
     response_type = request.args.get('response_type')
     client_id = request.args.get('client_id')
     redirect_uri = request.args.get('redirect_uri')
@@ -100,23 +103,32 @@ def fa_authorize():
 @app.route('/linkedin/accessToken', methods=['POST'])
 def li_accessToken():
     logger.info("LinkedIn Token Exchange: %s", request.form.to_dict())
+    time.sleep(3)
     grant_type = request.form.get('grant_type')
     auth_code = request.form.get('code')
     client_id = request.form.get('client_id')
     client_secret = request.form.get('client_secret')
+    state = request.form.get('state')
     redirect_uri = request.form.get('redirect_uri')
     if redirect_uri is not None and redirect_uri != '' \
         and grant_type == LINKED_IN_DATA['grant_type'] \
         and auth_code == LINKED_IN_DATA['auth_code']   \
         and client_id == LINKED_IN_DATA['client_id']   \
         and client_secret == LINKED_IN_DATA['client_secret']:
+        payload = {
+            "sub": "123",
+            "iat": datetime.datetime.now(datetime.UTC),
+            "exp": datetime.datetime.utcnow() + datetime.timedelta(seconds=LINKED_IN_DATA['jwt_expiration'])
+        }
+        access_token = jwt.encode(payload, LINKED_IN_DATA['secret_key'], algorithm='HS256')
+        logger.info(f"Token: {access_token}")
         return jsonify({
-            # random UUID for now until we add simple JWT generation
-            "access_token": 'a001e709-453f-4006-916e-3232235c039b',
-            "expires_in": 64000,
+            "access_token": access_token,
+            "expires_in": LINKED_IN_DATA['jwt_expiration'],
             "refresh_token": "REFRESH_TOKEN",
             "refresh_token_expires_in": 64000,
-            "scope": ""
+            "scope": "",
+            "state": state
         })
     return jsonify({"error": "invalid request params"}), 401
 
@@ -124,6 +136,7 @@ def li_accessToken():
 @app.route('/fusionauth/accessToken', methods=['POST'])
 def fa_accessToken():
     logger.info("LinkedIn Token Exchange: %s", request.form.to_dict())
+    time.sleep(3)
     grant_type = request.form.get('grant_type')
     auth_code = request.form.get('code')
     client_id = request.form.get('client_id')

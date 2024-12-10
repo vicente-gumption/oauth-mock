@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <title>Un-LinkedIn</title>
+</head>
+
+<body>
+    <h1>{{ service_name }} Authorization Request</h1>
+    <p>Application <strong>{{ client_id }}</strong> is requesting access.</p>
+    <form method="post" action="{{service_path}}">
+        <!-- Dynamically include all query string parameters -->
+        {% for key, value in request.args.items() %}
+        <input type="hidden" name="{{ key }}" value="{{ value }}">
+        {% endfor %}
+        <button type="submit" name="approve" value="yes">Approve</button>
+        <button type="submit" name="approve" value="no">Deny</button>
+    </form>
+</body>
+
+</html>
